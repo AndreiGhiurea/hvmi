@@ -1956,6 +1956,183 @@ leave:
     return INT_STATUS_SUCCESS;
 }
 
+INTSTATUS
+IntPeFindExportByNameUser(
+    _In_ QWORD ImageBase,
+    _In_ QWORD Cr3,
+    _In_opt_ BYTE* ImageBaseBuffer,
+    _In_z_ CHAR* Name,
+    _Out_ DWORD* ExportRva
+)
+///
+/// @brief Find the export name a Rva lies in.
+///
+/// @param[in]  ImageBase       Guest virtual address of the beginning of the module (headers).
+/// @param[in]  ImageBaseBuffer Buffer containing the MZ/PE image.
+/// @param[in]  Name            Export name to be found.
+/// @param[out] ExportRva       Rva the indicated export is found at.
+///
+/// @retval #INT_STATUS_SUCCESS On success.
+/// @retval #INT_STATUS_NOT_FOUND If no export containing the Rva is found.
+/// @retval #INT_STATUS_INVALID_PARAMETER If an invalid parameter is supplied.
+/// @retval #INT_STATUS_INVALID_OBJECT_TYPE If the MZ/PE file is malformed or corrupted in any way.
+/// @retval #INT_STATUS_INSUFFICIENT_RESOURCES If a memory alloc fails.
+///
+{
+    SIZE_T exportNameLen;
+    BOOLEAN found;
+    INTSTATUS status;
+    IMAGE_DATA_DIRECTORY dir;
+    BYTE* map;
+    BYTE* exportNameBuffer;
+    IMAGE_EXPORT_DIRECTORY exportDir;
+    int left, right;
+
+    if (NULL == Name)
+    {
+        return INT_STATUS_INVALID_PARAMETER_3;
+    }
+
+    if (NULL == ExportRva)
+    {
+        return INT_STATUS_INVALID_PARAMETER_4;
+    }
+
+    exportNameBuffer = NULL;
+    found = FALSE;
+    exportNameLen = strlen(Name);
+
+    if (exportNameLen >= 512)
+    {
+        return INT_STATUS_INVALID_PARAMETER_4;
+    }
+
+    if (NULL != ImageBaseBuffer)
+    {
+        map = ImageBaseBuffer;
+    }
+    else
+    {
+        status = IntVirtMemMap(ImageBase, PAGE_SIZE, Cr3, 0, &map);
+        if (!INT_SUCCESS(status))
+        {
+            ERROR("[ERROR] Failed mapping VA 0x%016llx to host: 0x%08x\n", ImageBase, status);
+            return status;
+        }
+    }
+
+    // Get the export directory, if present
+    status = IntPeGetDirectory(ImageBase, map, IMAGE_DIRECTORY_ENTRY_EXPORT, &dir);
+    if (!INT_SUCCESS(status))
+    {
+        goto leave;
+    }
+
+    // Read the export directory
+    status = IntVirtMemRead(ImageBase + dir.VirtualAddress, sizeof(IMAGE_EXPORT_DIRECTORY), Cr3, &exportDir, NULL);
+    if (!INT_SUCCESS(status))
+    {
+        // Export directory is pageable so it CAN happen to not be present, so don't spam
+        if (status != INT_STATUS_PAGE_NOT_PRESENT)
+        {
+            WARNING("[ERROR] Failed to read the export directory of 0x%016llx located at 0x%016llx: 0x%08x\n",
+                ImageBase, ImageBase + dir.VirtualAddress, status);
+        }
+        goto leave;
+    }
+
+    // exportNameLen + 1 OK: exportNameLen is not longer than 512.
+    exportNameBuffer = HpAllocWithTag(exportNameLen + 1ull, IC_TAG_EXPN);
+    if (NULL == exportNameBuffer)
+    {
+        status = INT_STATUS_INSUFFICIENT_RESOURCES;
+        goto leave;
+    }
+
+    left = 0;
+    right = MIN(exportDir.NumberOfNames, 10000ul); // Cap the number of exported names to 10K.
+
+    // The export names are sorted, therefore, we can do a binary search.
+    while (left < right)
+    {
+        DWORD namePointer;
+        int mid, res;
+
+        mid = (left + right) / 2;
+
+        status = IntVirtMemFetchDword(ImageBase + exportDir.AddressOfNames + mid * 4ull, Cr3, &namePointer);
+        if (!INT_SUCCESS(status))
+        {
+            goto leave;
+        }
+
+        status = IntVirtMemRead(ImageBase + namePointer, (DWORD)exportNameLen + 1, Cr3, exportNameBuffer, NULL);
+        if (!INT_SUCCESS(status))
+        {
+            goto leave;
+        }
+
+        // compare the null-terminator too so we can avoid cases like: ExAllocatePool equals ExAllocatePoolWithTag
+        res = memcmp(Name, exportNameBuffer, exportNameLen + 1ull);
+
+        if (0 == res)
+        {
+            DWORD exportOrdinal;
+
+            // Get the export ordinal
+            status = IntVirtMemFetchDword(ImageBase + exportDir.AddressOfNameOrdinals + mid * 2ull, Cr3,
+                &exportOrdinal);
+            if (!INT_SUCCESS(status))
+            {
+                goto leave;
+            }
+            exportOrdinal &= 0xFFFF;
+
+            // Read the export RVA
+            status = IntVirtMemFetchDword(ImageBase + exportDir.AddressOfFunctions + exportOrdinal * 4ull, Cr3,
+                ExportRva);
+            if (!INT_SUCCESS(status))
+            {
+                goto leave;
+            }
+
+            // It's the callers duty to see if this is forwarded
+            found = TRUE;
+            break;
+        }
+        else if (res < 0)
+        {
+            right = mid;
+        }
+        else
+        {
+            left = mid + 1;
+        }
+    }
+
+leave:
+    if (NULL != exportNameBuffer)
+    {
+        HpFreeAndNullWithTag(&exportNameBuffer, IC_TAG_EXPN);
+    }
+
+    if (ImageBaseBuffer == NULL)
+    {
+        IntVirtMemUnmap(&map);
+    }
+
+    // return the error if any...
+    if (!INT_SUCCESS(status))
+    {
+        return status;
+    }
+    else if (!found)
+    {
+        return INT_STATUS_NOT_FOUND;
+    }
+
+    return INT_STATUS_SUCCESS;
+}
 
 INTSTATUS
 IntPeFindExportByOrdinal(

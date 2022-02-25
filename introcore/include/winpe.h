@@ -686,6 +686,15 @@ IntPeFindExportByName(
     );
 
 INTSTATUS
+IntPeFindExportByNameUser(
+    _In_ QWORD ImageBase,
+    _In_ QWORD Cr3,
+    _In_opt_ BYTE* ImageBaseBuffer,
+    _In_z_ CHAR* Name,
+    _Out_ DWORD* ExportRva
+    );
+
+INTSTATUS
 IntPeFindExportByOrdinal(
     _In_ QWORD ImageBase,
     _In_opt_ BYTE *ImageBaseBuffer,
