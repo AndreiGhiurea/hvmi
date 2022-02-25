@@ -1565,6 +1565,7 @@ IntGetValueFromOperand(
     return INT_STATUS_SUCCESS;
 }
 
+BYTE gCodePage[PAGE_SIZE];
 
 INTSTATUS
 IntDecEmulateRead(
@@ -1594,7 +1595,7 @@ IntDecEmulateRead(
     OPERAND_VALUE srcValue = { 0 };
     BOOLEAN hasSrc = FALSE;
     INTSTATUS status;
-    DWORD ring;
+    // DWORD ring;
 
     if (NULL == Instrux)
     {
@@ -1614,23 +1615,31 @@ IntDecEmulateRead(
         return INT_STATUS_NOT_SUPPORTED;
     }
 
-    // The RIP must be in kernel
-    if ((gGuest.OSType == introGuestWindows && !IS_KERNEL_POINTER_WIN(gGuest.Guest64, regs->Rip)) ||
-        (gGuest.OSType == introGuestLinux && !IS_KERNEL_POINTER_LIX(regs->Rip)))
-    {
-        ERROR("[ERROR] RIP is not in kernel: 0x%016llx\n", regs->Rip);
-        return INT_STATUS_NOT_SUPPORTED;
-    }
-
-    // The access must be done in kernel
-    if ((gGuest.OSType == introGuestWindows &&
-            !IS_ACCESS_IN_KERNEL_WIN(gGuest.Guest64, gVcpu->Gla, gVcpu->AccessSize)) ||
-        (gGuest.OSType == introGuestLinux &&
-            !IS_ACCESS_IN_KERNEL_LIX(gVcpu->Gla, gVcpu->AccessSize)))
-    {
-        ERROR("[ERROR] Access is not in kernel: [0x%016llx, 0x%016llx)\n", gVcpu->Gla, gVcpu->Gla + gVcpu->AccessSize);
-        return INT_STATUS_NOT_SUPPORTED;
-    }
+    // // The RIP must be in kernel
+    // if ((gGuest.OSType == introGuestWindows && !IS_KERNEL_POINTER_WIN(gGuest.Guest64, regs->Rip)) ||
+    //     (gGuest.OSType == introGuestLinux && !IS_KERNEL_POINTER_LIX(regs->Rip)))
+    // {
+    //     ERROR("[ERROR] RIP is not in kernel: 0x%016llx\n", regs->Rip);
+    //     status = IntVirtMemRead(regs->Rip & PAGE_MASK, PAGE_SIZE, regs->Cr3, gCodePage, NULL);
+    //     if (!INT_SUCCESS(status))
+    //     {
+    //         ERROR("[ERROR] PAGE READ FAILED\n");
+    //     }
+    // 
+    //     IntDumpCode(gCodePage, 0, IG_CS_TYPE_64B, regs);
+    // 
+    //     return INT_STATUS_NOT_SUPPORTED;
+    // }
+    // 
+    // // The access must be done in kernel
+    // if ((gGuest.OSType == introGuestWindows &&
+    //         !IS_ACCESS_IN_KERNEL_WIN(gGuest.Guest64, gVcpu->Gla, gVcpu->AccessSize)) ||
+    //     (gGuest.OSType == introGuestLinux &&
+    //         !IS_ACCESS_IN_KERNEL_LIX(gVcpu->Gla, gVcpu->AccessSize)))
+    // {
+    //     ERROR("[ERROR] Access is not in kernel: [0x%016llx, 0x%016llx)\n", gVcpu->Gla, gVcpu->Gla + gVcpu->AccessSize);
+    //     return INT_STATUS_NOT_SUPPORTED;
+    // }
 
     // The access must be read
     if (ND_ACCESS_READ != (Instrux->MemoryAccess & ND_ACCESS_READ))
@@ -1639,19 +1648,19 @@ IntDecEmulateRead(
         return INT_STATUS_NOT_SUPPORTED;
     }
 
-    status = IntGetCurrentRing(IG_CURRENT_VCPU, &ring);
-    if (!INT_SUCCESS(status))
-    {
-        ERROR("[ERROR] IntGetCurrentRing failed: 0x%08x\n", status);
-        return status;
-    }
-
-    // The current ring must be 0
-    if (ring != IG_CS_RING_0)
-    {
-        ERROR("[ERROR] Ring is not 0: %d\n", ring);
-        return INT_STATUS_NOT_SUPPORTED;
-    }
+    // status = IntGetCurrentRing(IG_CURRENT_VCPU, &ring);
+    // if (!INT_SUCCESS(status))
+    // {
+    //     ERROR("[ERROR] IntGetCurrentRing failed: 0x%08x\n", status);
+    //     return status;
+    // }
+    // 
+    // // The current ring must be 0
+    // if (ring != IG_CS_RING_0)
+    // {
+    //     ERROR("[ERROR] Ring is not 0: %d\n", ring);
+    //     return INT_STATUS_NOT_SUPPORTED;
+    // }
 
     if (SrcValueBuffer != NULL)
     {
