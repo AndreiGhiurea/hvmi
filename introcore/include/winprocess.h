@@ -367,6 +367,7 @@ typedef struct _WIN_PROCESS_OBJECT
         /// @brief  The Discretionary Access Control List header.
         ACL                     Dacl;
     } SecurityDescriptor;
+    void* ClkHandle;
 
 } WIN_PROCESS_OBJECT, *PWIN_PROCESS_OBJECT;
 
