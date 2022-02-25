@@ -2393,6 +2393,24 @@ cleanup_and_exit:
 }
 
 
+INTSTATUS CustomCloakHandle(
+    _In_ void* Hook,
+    _In_ QWORD Address,
+    _In_ QWORD RegionVirtualAddress,
+    _In_ void* CloakHandle,
+    _Out_ INTRO_ACTION* Action)
+{
+    UNREFERENCED_PARAMETER(Hook);
+    UNREFERENCED_PARAMETER(RegionVirtualAddress);
+    UNREFERENCED_PARAMETER(CloakHandle);
+
+    LOG("[MEMCLOAK] Attempted write at address: 0x%016llx\n", Address);
+
+    *Action = introGuestNotAllowed;
+
+    return INT_STATUS_SUCCESS;
+}
+
 INTSTATUS
 IntWinAgentHandleVmcall(
     _In_ QWORD Rip
@@ -2449,6 +2467,108 @@ IntWinAgentHandleVmcall(
             if (!INT_SUCCESS(status))
             {
                 ERROR("[ERROR] IntWinAgentHandleDriverVmcall failed: 0x%08x\n", status);
+            }
+        }
+    }
+    else if (3 == ring && (regs->Rbx & 0xFFFFFFFFFF000000) == 0xC0FFEEBEA9000000){
+        // Handle our VMCALL
+        PWIN_PROCESS_OBJECT pProc = IntWinProcFindObjectByCr3(regs->Cr3);
+        LOG("VMCALL de la %s\n", pProc->Name);
+
+        pProc = IntWinProcFindObjectByName("introdefender.", FALSE);
+        if (NULL == pProc)
+        {
+            ERROR("[ERROR] introdefender.exe not found\n");
+            goto cleanup_and_exit;
+        }
+
+        DWORD arg = regs->Rbx & 0xFFFFFF;
+        LOG("VMCALL arg: %d\n", arg);
+
+        // Read value from address
+        if (arg == 1)
+        {
+            DWORD readDataUser = 0xEEEE;
+            status = IntVirtMemFetchDword(0x3FFF0000, pProc->UserCr3, &readDataUser);
+            if (!INT_SUCCESS(status))
+            {
+                ERROR("[ERROR] failed reading with userCr3, status: 0x%08lx\n", status);
+            }
+
+            LOG("Am citit din intro defender exe cu userCr3 asta: 0x%04x\n", readDataUser);
+        }
+        // Write vmcall value
+        else if (arg == 2)
+        {
+            DWORD vmcall = 0xCCCCCCCC;
+            status = IntVirtMemWrite(0x3FFF0000, sizeof(DWORD), pProc->UserCr3, &vmcall);
+            if (!INT_SUCCESS(status))
+            {
+                ERROR("[ERROR] failed writing vmcall to buffer, status: 0x%08lx\n", status);
+            }
+            else
+            {
+                LOG("Am scris VMCALL\n");
+            }
+        }
+        // Write NOP's back
+        else if (arg == 3)
+        {
+            DWORD nops = 0x90909090;
+            status = IntVirtMemWrite(0x3FFF0000, sizeof(DWORD), pProc->UserCr3, &nops);
+            if (!INT_SUCCESS(status))
+            {
+                ERROR("[ERROR] failed writing nops to buffer, status: 0x%08lx\n", status);
+            }
+            else
+            {
+                LOG("Am scris NOPS\n");
+            }
+        }
+        // Cloak memory
+        else if (arg == 4)
+        {
+            BYTE originalData[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+            // BYTE patchedData[] = { 0xCC, 0xCC, 0xCC, 0xCC };
+            BYTE patchedData[] = { 0x48, 0xb8, 0xe0, 0x10, 0x78, 0xbd, 0xf6, 0x7f, 0x00, 0x00, 0xff, 0xe0 };
+
+            DWORD exportRva;
+            status = IntPeFindExportByNameUser(pProc->MainModuleAddress, pProc->Cr3, NULL, "PrintFunction", &exportRva);
+            if (!INT_SUCCESS(status))
+            {
+                ERROR("[ERROR] IntPeFindExportByNameUser failed with status: 0x%08x\n", status);
+            }
+
+            QWORD funcAddr = pProc->MainModuleAddress + exportRva;
+
+            memcpy(patchedData + 2, &funcAddr, 8);
+            LOG("Patched data: ");
+            for (BYTE i = 0; i < sizeof(patchedData); i++) {
+                LOG("0x%02x ", patchedData[i]);
+            }
+            LOG("\n");
+
+            status = IntMemClkCloakRegion(0x3FFF0000, pProc->Cr3, sizeof(patchedData), MEMCLOAK_OPT_APPLY_PATCH, originalData, patchedData, NULL, &pProc->ClkHandle);
+            if (!INT_SUCCESS(status))
+            {
+                ERROR("[ERROR] IntMemClkCloakRegion failed with status: 0x%08x\n", status);
+            }
+            else
+            {
+                LOG("Am cloakuit cu cr3\n");
+            }
+        }
+        // Uncloak memory
+        else if (arg == 5)
+        {
+            status = IntMemClkUncloakRegion(pProc->ClkHandle, MEMCLOAK_OPT_APPLY_PATCH);
+            if (!INT_SUCCESS(status))
+            {
+                ERROR("[ERROR] IntMemClkUncloakRegion failed with status: 0x%08x\n", status);
+            }
+            else
+            {
+                LOG("Am uncloakuit\n");
             }
         }
     }
