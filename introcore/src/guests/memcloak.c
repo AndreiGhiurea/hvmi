@@ -449,7 +449,7 @@ IntMemClkHandleRead(
 
 #ifdef DEBUG
 
-    TRACE("[MEMCLOAK] Handled the access on 0x%016llx/0x%016llx with retBufOffset = 0x%08x, "
+    LOG("[MEMCLOAK] Handled the access on 0x%016llx/0x%016llx with retBufOffset = 0x%08x, "
           "origCodeOffset = 0x%08x, patchSize = 0x%08x\n",
           gla, Gpa, retBufOffset, origCodeOffset, patchSize);
 
@@ -916,7 +916,7 @@ IntMemClkUncloakRegionInternal(
 
         memcpy(Region->PatchedData, Region->OriginalData, Region->Size);
 
-        status = IntKernVirtMemWrite(Region->Gva, Region->Size, Region->OriginalData);
+        status = IntVirtMemWrite(Region->Gva, Region->Size, Region->Cr3, Region->OriginalData);
 
         IntResumeVcpus();
 
